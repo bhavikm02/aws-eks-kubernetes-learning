@@ -1,5 +1,59 @@
 # DevOps with AWS Developer Tools on AWS EKS
 
+## CI/CD Pipeline Diagram
+
+```mermaid
+graph LR
+    DEV[Developer] -->|1. Push Code| GH[GitHub Repository]
+    
+    GH -->|2. Trigger| CP[CodePipeline]
+    
+    CP -->|Stage 1: Source| SOURCE[GitHub Source<br/>main branch]
+    SOURCE -->|Artifacts| BUILD
+    
+    CP -->|Stage 2: Build| BUILD[CodeBuild<br/>buildspec-build.yml]
+    BUILD -->|Build Docker Image| IMG[Docker Image]
+    IMG -->|Push| ECR[AWS ECR]
+    BUILD -->|Artifacts| APPROVAL
+    
+    CP -->|Stage 3: Approval| APPROVAL[Manual Approval<br/>SNS Notification]
+    APPROVAL -->|Email| ADMIN[Admin Approves]
+    ADMIN -->|Approved| DEPLOY
+    
+    CP -->|Stage 4: Deploy| DEPLOY[CodeBuild<br/>buildspec-deploy.yml]
+    DEPLOY -->|Assume Role| STS[STS AssumeRole<br/>EksCodeBuildKubectlRole]
+    STS -->|kubectl commands| EKS[EKS Cluster]
+    
+    EKS -->|Pull Image| ECR
+    EKS -->|Deploy Pods| PODS[Running Application]
+    
+    PODS -->|Register DNS| R53[Route 53<br/>External DNS]
+    PODS -->|Expose| ALB[Application Load Balancer]
+    
+    USER[End Users] --> ALB
+    ALB --> PODS
+    
+    style GH fill:#2E8B57
+    style BUILD fill:#4A90E2
+    style DEPLOY fill:#9B59B6
+    style ECR fill:#FF9900
+    style APPROVAL fill:#FFD700
+    style PODS fill:#90EE90
+```
+
+### Diagram Explanation
+
+- **GitHub Integration**: Source control triggers **CodePipeline** on push to main branch via **GitHub App connection**
+- **Build Stage**: **CodeBuild** executes **buildspec-build.yml**, compiles Docker image, pushes to **ECR** with Git commit SHA as tag
+- **Manual Approval**: **SNS notification** sent to admins, pipeline pauses until **manual approval** via email link or console
+- **STS AssumeRole**: Deploy stage uses **temporary credentials** via **AssumeRole** for secure **kubectl** access to EKS cluster
+- **aws-auth ConfigMap**: Maps **IAM role** to **Kubernetes RBAC**, grants CodeBuild **system:masters** permissions for deployments
+- **Deploy Stage**: Updates Kubernetes manifests with **image URI:tag**, applies manifests using **kubectl**, waits for **rollout completion**
+- **Image Tagging Strategy**: Uses **short Git SHA** (7 chars) as Docker tag, enables **traceability** from deployment to code commit
+- **IAM Policies**: CodeBuild roles need **ECR push/pull**, **EKS describe**, and **STS AssumeRole** permissions for pipeline stages
+- **External DNS**: Automatically creates **Route 53 DNS records** from Ingress annotations, enables custom domain access
+- **Rollback Capability**: CodePipeline tracks **artifact versions**, enables quick **rollback** to previous deployments via **kubectl rollout undo**
+
 ## Step-01: Introduction to DevOps
 - Understand DevOps concepts
   - CI - Continuous Integration

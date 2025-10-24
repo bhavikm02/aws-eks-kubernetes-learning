@@ -1,5 +1,71 @@
 # Install AWS, kubectl & eksctl CLI's
 
+## Architecture Diagram
+
+```mermaid
+graph TB
+    START([Start Installation]) --> OS{Operating System?}
+    
+    OS -->|macOS| MAC[macOS Installation]
+    OS -->|Windows| WIN[Windows Installation]
+    OS -->|Linux| LIN[Linux Installation]
+    
+    MAC --> AWSMAC[Install AWS CLI<br/>curl + installer]
+    WIN --> AWSWIN[Install AWS CLI<br/>MSI Package]
+    LIN --> AWSLIN[Install AWS CLI<br/>pip or binary]
+    
+    AWSMAC --> KUBEMAC[Install kubectl<br/>Download from Amazon EKS]
+    AWSWIN --> KUBEWIN[Install kubectl<br/>Download from Amazon EKS]
+    AWSLIN --> KUBELIN[Install kubectl<br/>Download from Amazon EKS]
+    
+    KUBEMAC --> EKSTLMAC[Install eksctl<br/>Homebrew]
+    KUBEWIN --> EKSCTLWIN[Install eksctl<br/>chocolatey or binary]
+    KUBELIN --> EKSCTLLIN[Install eksctl<br/>curl or binary]
+    
+    EKSTLMAC --> CONFIG[Configure AWS CLI]
+    EKSCTLWIN --> CONFIG
+    EKSCTLLIN --> CONFIG
+    
+    CONFIG --> KEYS[Create IAM Access Keys]
+    KEYS --> AWSCONFIG[Run: aws configure]
+    
+    AWSCONFIG --> INPUT1[Access Key ID]
+    AWSCONFIG --> INPUT2[Secret Access Key]
+    AWSCONFIG --> INPUT3[Default Region]
+    AWSCONFIG --> INPUT4[Output Format: json]
+    
+    INPUT1 --> VERIFY
+    INPUT2 --> VERIFY
+    INPUT3 --> VERIFY
+    INPUT4 --> VERIFY[Verify Installation]
+    
+    VERIFY --> TEST1[aws --version]
+    VERIFY --> TEST2[kubectl version --client]
+    VERIFY --> TEST3[eksctl version]
+    
+    TEST1 --> SUCCESS([Ready for EKS])
+    TEST2 --> SUCCESS
+    TEST3 --> SUCCESS
+    
+    style START fill:#90EE90
+    style CONFIG fill:#FFD700
+    style SUCCESS fill:#90EE90
+    style KEYS fill:#FF6B6B
+```
+
+### Diagram Explanation
+
+- **Operating System Choice**: Installation steps vary by OS - **macOS** uses Homebrew, **Windows** uses MSI installers, **Linux** uses package managers or binaries
+- **AWS CLI Installation**: Essential for **AWS API calls**, manages credentials, and enables **programmatic access** to all AWS services
+- **kubectl Installation**: The **Kubernetes command-line tool** that communicates with the cluster **API server** to manage workloads and resources
+- **eksctl Installation**: Simplifies **EKS cluster creation** and management, automatically handles **VPC**, **IAM roles**, and **CloudFormation** stacks
+- **Amazon EKS-vended kubectl**: Always use **AWS-provided kubectl binary** to ensure **version compatibility** with your specific EKS cluster version
+- **IAM Access Keys**: Create keys from **IAM user** (never root user) with appropriate **permissions** for EKS, EC2, and VPC operations
+- **AWS Configuration**: Stores credentials in **~/.aws/credentials** and config in **~/.aws/config** for automated authentication
+- **Default Region**: Choose region closest to your location for **lower latency** and ensure **service availability** (e.g., us-east-1)
+- **Verification Tests**: Running version commands confirms **successful installation** and **PATH configuration** for all three tools
+- **Security Best Practice**: Never commit AWS credentials to code repositories; use **environment variables** or **AWS credential files** only
+
 ## Step-00: Introduction
 - Install AWS CLI
 - Install kubectl CLI

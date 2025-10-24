@@ -1,5 +1,96 @@
 # Create EKS Cluster & Node Groups
 
+## Architecture Diagram
+
+```mermaid
+graph TB
+    START([eksctl create cluster]) --> CP[Create EKS Control Plane<br/>15-20 minutes]
+    
+    CP --> CFCP[CloudFormation Stack<br/>Control Plane]
+    CFCP --> VPC[Create VPC Resources]
+    
+    VPC --> SUBNET1[Public Subnets]
+    VPC --> SUBNET2[Private Subnets]
+    VPC --> IGW[Internet Gateway]
+    VPC --> NAT[NAT Gateway]
+    VPC --> RT[Route Tables]
+    VPC --> SG[Security Groups]
+    
+    SUBNET1 --> OIDC[Associate IAM OIDC Provider]
+    SUBNET2 --> OIDC
+    IGW --> OIDC
+    NAT --> OIDC
+    RT --> OIDC
+    SG --> OIDC
+    
+    OIDC --> IRSA[Enable IRSA<br/>IAM Roles for Service Accounts]
+    
+    IRSA --> KEYPAIR[Create EC2 Keypair<br/>For SSH Access]
+    
+    KEYPAIR --> NG[eksctl create nodegroup]
+    
+    NG --> CFNG[CloudFormation Stack<br/>Node Group]
+    
+    CFNG --> CONFIG[Node Group Configuration]
+    CONFIG --> INST[Instance Type: t3.medium]
+    CONFIG --> COUNT[Nodes: 2 min, 4 max]
+    CONFIG --> VOL[Volume Size: 20GB]
+    CONFIG --> SSH[SSH Access: Enabled]
+    
+    CFNG --> ADDONS[Additional Add-ons]
+    ADDONS --> ASG[ASG Access]
+    ADDONS --> DNS[External DNS Access]
+    ADDONS --> ECR[Full ECR Access]
+    ADDONS --> ALB[ALB Ingress Access]
+    ADDONS --> MESH[App Mesh Access]
+    
+    INST --> IAM[Create IAM Role]
+    COUNT --> IAM
+    VOL --> IAM
+    SSH --> IAM
+    
+    ASG --> POLICY[Attach IAM Policies]
+    DNS --> POLICY
+    ECR --> POLICY
+    ALB --> POLICY
+    MESH --> POLICY
+    
+    IAM --> LAUNCH[Launch EC2 Instances]
+    POLICY --> LAUNCH
+    
+    LAUNCH --> JOIN[Join Cluster]
+    JOIN --> VERIFY[Verify Setup]
+    
+    VERIFY --> CHECK1[kubectl get nodes]
+    VERIFY --> CHECK2[Verify Security Groups]
+    VERIFY --> CHECK3[Verify IAM Roles]
+    VERIFY --> CHECK4[Test SSH Access]
+    
+    CHECK1 --> READY([Cluster Ready])
+    CHECK2 --> READY
+    CHECK3 --> READY
+    CHECK4 --> READY
+    
+    style START fill:#90EE90
+    style CP fill:#FF9900
+    style OIDC fill:#4A90E2
+    style NG fill:#9B59B6
+    style READY fill:#90EE90
+```
+
+### Diagram Explanation
+
+- **Control Plane Creation**: Takes **15-20 minutes**, AWS manages **etcd**, **API server**, **scheduler**, and **controller manager** across **multiple AZs**
+- **CloudFormation Automation**: eksctl uses **CloudFormation stacks** to create and track all resources, enabling **easy rollback** and **cleanup**
+- **VPC Architecture**: Automatically provisions **public subnets** (for load balancers), **private subnets** (for nodes), **NAT gateways**, and **routing tables**
+- **Security Groups**: Creates **control plane security group** and **node security group** with proper **ingress/egress rules** for cluster communication
+- **IAM OIDC Provider**: Essential for **IRSA** (IAM Roles for Service Accounts), allows pods to assume **IAM roles** without node-level credentials
+- **Service Account Integration**: OIDC enables **fine-grained IAM permissions** for individual pods using **Kubernetes service accounts** mapped to **IAM roles**
+- **EC2 Keypair**: Required for **SSH access** to worker nodes for **debugging**, **troubleshooting**, and **log inspection**
+- **Managed Node Group**: AWS handles **AMI updates**, **graceful termination**, and **ASG integration** for worker node lifecycle management
+- **Add-on Policies**: Pre-configured **IAM policies** for common use cases - **ALB Ingress**, **External DNS**, **ECR pulls**, **Cluster Autoscaler**
+- **Node Configuration**: Specifies **instance type**, **scaling limits**, **EBS volume size**, and enables **managed scaling** through Auto Scaling Groups
+
 ## Step-00: Introduction
 - Understand about EKS Core Objects
   - Control Plane

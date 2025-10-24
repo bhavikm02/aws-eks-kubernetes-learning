@@ -1,5 +1,90 @@
 # EKS Storage -  Storage Classes, Persistent Volume Claims
 
+## MySQL Deployment Architecture
+
+```mermaid
+graph TB
+    START([kubectl apply]) --> SC[Create Storage Class]
+    
+    SC --> SCDETAILS[Storage Class: ebs-sc]
+    SCDETAILS --> PROV[Provisioner: ebs.csi.aws.com]
+    SCDETAILS --> TYPE[Volume Type: gp3]
+    SCDETAILS --> BIND[Binding Mode: WaitForFirstConsumer]
+    
+    START --> PVC[Create PVC]
+    PVC --> PVCDETAILS[PVC: ebs-mysql-pv-claim]
+    PVCDETAILS --> SIZE[Size: 4Gi]
+    PVCDETAILS --> MODE[Access Mode: ReadWriteOnce]
+    PVCDETAILS --> REF[StorageClass: ebs-sc]
+    
+    START --> CM[Create ConfigMap]
+    CM --> CMDETAILS[usermgmt-dbcreation-script]
+    CMDETAILS --> SCRIPT[SQL: CREATE DATABASE usermgmt]
+    
+    BIND --> PENDING[PVC Status: Pending]
+    REF --> PENDING
+    
+    START --> DEP[Create MySQL Deployment]
+    
+    DEP --> PODSPEC[Pod Specification]
+    PODSPEC --> ENV[Environment Variables]
+    ENV --> ROOTPW[MYSQL_ROOT_PASSWORD]
+    
+    PODSPEC --> VOL[Volume Definition]
+    VOL --> VOLPVC[Volume: mysql-persistent-storage]
+    VOLPVC --> CLAIMSRC[ClaimName: ebs-mysql-pv-claim]
+    
+    PODSPEC --> MOUNT[Volume Mounts]
+    MOUNT --> DATADIR[MountPath: /var/lib/mysql]
+    MOUNT --> INITDIR[MountPath: /docker-entrypoint-initdb.d]
+    
+    CM --> INITDIR
+    
+    DEP --> TRIGGER[Pod Creation Triggers PVC]
+    PENDING --> TRIGGER
+    
+    TRIGGER --> CSICTRL[EBS CSI Controller]
+    CSICTRL --> CREATE[Create EBS Volume in AWS]
+    CREATE --> PV[Persistent Volume Created]
+    PV --> BOUNDPVC[PVC Status: Bound]
+    
+    BOUNDPVC --> ATTACH[CSI Node: Attach & Mount]
+    ATTACH --> MYSQL[MySQL Pod Running]
+    
+    MYSQL --> INIT[Execute Init Scripts from ConfigMap]
+    INIT --> DBREADY[Database: usermgmt created]
+    
+    START --> SVC[Create ClusterIP Service]
+    SVC --> SVCDETAILS[Service: mysql]
+    SVCDETAILS --> CLIP[ClusterIP: None - Headless]
+    SVCDETAILS --> PORT[Port: 3306]
+    SVCDETAILS --> SEL[Selector: app=mysql]
+    
+    MYSQL --> SVCDETAILS
+    DBREADY --> READY([MySQL Ready for Connections])
+    CLIP --> READY
+    
+    style SC fill:#4A90E2
+    style PVC fill:#9B59B6
+    style CM fill:#2E8B57
+    style MYSQL fill:#FF6B6B
+    style CREATE fill:#FF9900
+    style READY fill:#90EE90
+```
+
+### Diagram Explanation
+
+- **Storage Class**: Defines **EBS CSI provisioner** with **gp3 volume type** and **WaitForFirstConsumer** binding mode for optimized AZ placement
+- **WaitForFirstConsumer**: Delays **volume creation** until pod is scheduled, ensuring EBS volume is created in **same AZ** as the node
+- **Persistent Volume Claim**: Requests **4Gi storage** with **ReadWriteOnce** access (single node mount), references the ebs-sc storage class
+- **Dynamic Provisioning**: When pod is created, **CSI controller** automatically provisions **EBS volume** and creates **PersistentVolume** object
+- **ConfigMap for Initialization**: Contains **SQL script** to create **usermgmt database** schema, mounted at **/docker-entrypoint-initdb.d** for MySQL auto-execution
+- **Volume Mounts**: Pod mounts **mysql-persistent-storage** at **/var/lib/mysql** (data directory) and **configmap** at **/docker-entrypoint-initdb.d** (init scripts)
+- **Environment Variables**: MYSQL_ROOT_PASSWORD set from manifest, used by MySQL container for **initial root user** setup
+- **Headless Service**: ClusterIP None creates **DNS entry** pointing directly to **pod IP**, ideal for single-instance stateful applications
+- **Service Discovery**: Other pods connect to MySQL using **mysql.default.svc.cluster.local** hostname on **port 3306**
+- **Data Persistence**: Even if MySQL pod is deleted and recreated, data persists in **EBS volume** and **reattaches** to new pod automatically
+
 ## Step-01: Introduction
 - We are going to create a MySQL Database with persistence storage using AWS EBS Volumes
 

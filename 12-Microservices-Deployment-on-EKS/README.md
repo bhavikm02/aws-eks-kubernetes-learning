@@ -1,5 +1,81 @@
 # Microservices Deployment on EKS
 
+## Microservices Architecture Diagram
+
+```mermaid
+graph TB
+    USER[End Users] -->|HTTPS| ALB[Application Load Balancer<br/>SSL Termination]
+    ALB -->|Route 53 DNS| DNS[External DNS<br/>services.kubeoncloud.com]
+    
+    ALB -->|Forward to| INGRESS[Ingress Controller]
+    INGRESS -->|Route to| UMSSVC[User Management Service<br/>NodePort 8095]
+    
+    UMSSVC -->|Load Balance| UMS1[UMS Pod 1]
+    UMSSVC -->|Load Balance| UMS2[UMS Pod 2]
+    
+    UMS1 -->|DB Operations| MYSQL_SVC[MySQL ExternalName Service]
+    UMS2 -->|DB Operations| MYSQL_SVC
+    
+    MYSQL_SVC -->|DNS Lookup| RDS[AWS RDS MySQL<br/>usermgmtdb.rds.amazonaws.com]
+    
+    UMS1 -->|Send Notification API| NOTIF_SVC[Notification ClusterIP Service<br/>Port 8096]
+    UMS2 -->|Send Notification API| NOTIF_SVC
+    
+    NOTIF_SVC -->|Load Balance| NOTIF1[Notification Pod V1]
+    NOTIF_SVC -->|Load Balance| NOTIF2[Notification Pod V2]
+    
+    NOTIF1 -->|SMTP| SMTP_SVC[SMTP ExternalName Service]
+    NOTIF2 -->|SMTP| SMTP_SVC
+    
+    SMTP_SVC -->|DNS Lookup| SES[AWS SES<br/>email-smtp.us-east-1.amazonaws.com]
+    
+    SES -->|Email| RECIPIENT[User Email]
+    
+    subgraph "Microservices Communication"
+        SYNC[Synchronous REST API]
+        SERVICE_DISC[Service Discovery via DNS]
+        CLUSTERIP[ClusterIP for internal]
+        EXTERNALNAME[ExternalName for AWS services]
+    end
+    
+    subgraph "API Endpoints"
+        API1[POST /usermgmt/user<br/>Create User]
+        API2[GET /usermgmt/users<br/>List Users]
+        API3[POST /notification/send<br/>Send Email]
+        API4[GET /usermgmt/health-status]
+    end
+    
+    UMS1 -.->|Implements| API1
+    UMS1 -.->|Implements| API2
+    NOTIF1 -.->|Implements| API3
+    
+    subgraph "Deployment Strategies"
+        ROLLING[Rolling Update]
+        CANARY[Canary Deployment]
+        BLUE_GREEN[Blue-Green]
+        KUBECTL[kubectl set image]
+    end
+    
+    style UMS1 fill:#4A90E2
+    style NOTIF1 fill:#9B59B6
+    style RDS fill:#527FFF
+    style SES fill:#FF9900
+    style ALB fill:#FF6B6B
+```
+
+### Diagram Explanation
+
+- **Service-to-Service Communication**: User Management calls Notification Service via **ClusterIP**, using **service name** (notification-clusterip-service) for **DNS resolution**
+- **ExternalName Service**: Maps Kubernetes service name to **external DNS** (RDS endpoint, SES SMTP), enables seamless **AWS service integration**
+- **Synchronous REST API**: UMS makes **HTTP POST** to Notification Service on user creation, waits for response, **tight coupling** for immediate feedback
+- **RDS Integration**: MySQL **ExternalName service** resolves to **RDS endpoint**, eliminates pod-based database, provides **managed backup** and **high availability**
+- **SES SMTP**: Notification Service connects to **AWS SES** via SMTP protocol, requires **SMTP credentials** and **verified email addresses**
+- **ClusterIP for Internal**: Notification Service uses **ClusterIP**, not exposed externally, accessible only from **within cluster**
+- **ALB Ingress**: Exposes only User Management Service externally via **ALB**, Notification Service remains **internal-only microservice**
+- **Service Discovery**: Kubernetes **CoreDNS** resolves service names to **ClusterIP addresses**, enables location-independent service calls
+- **Rolling Update**: Deploy new versions using **kubectl set image** or **kubectl apply**, gradual replacement of old pods with new ones
+- **Health Endpoints**: Both services expose **/health-status** for **readiness/liveness probes** and **external monitoring**
+
 ## Step-00: What are Microservices?
 - Understand what are microservices on  a very high level
 

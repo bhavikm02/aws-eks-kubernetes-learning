@@ -1,5 +1,59 @@
 # Amazon EKS Pod Identity Agent - Demo
 
+## Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant DEV as Developer
+    participant IAM as IAM Console
+    participant EKS as EKS Console
+    participant API as EKS API Server
+    participant WEBHOOK as Pod Identity Webhook
+    participant POD as AWS CLI Pod
+    participant PIA as Pod Identity Agent<br/>(DaemonSet)
+    participant AUTH as EKS Auth API
+    participant S3 as Amazon S3
+
+    DEV->>IAM: 1. Create IAM Role
+    IAM->>IAM: Trust: pods.eks.amazonaws.com
+    IAM->>IAM: Attach AmazonS3ReadOnlyAccess
+
+    DEV->>EKS: 2. Create Pod Identity Association
+    EKS->>EKS: Map: namespace/SA → IAM Role
+    
+    DEV->>API: 3. Deploy Pod (serviceAccount: aws-cli-sa)
+    API->>WEBHOOK: Pod Creation Event
+    WEBHOOK->>WEBHOOK: Mutate Pod Spec
+    WEBHOOK->>POD: Inject AWS_CONTAINER_CREDENTIALS_FULL_URI
+    WEBHOOK->>POD: Mount projected SA token
+    
+    POD->>POD: 4. Pod starts, AWS SDK initializes
+    POD->>PIA: 5. Request credentials (via env vars)
+    PIA->>AUTH: 6. AssumeRoleForPodIdentity API
+    AUTH->>AUTH: 7. Validate Association
+    AUTH->>PIA: 8. Return temporary credentials
+    PIA->>POD: 9. Provide IAM credentials
+    
+    POD->>S3: 10. aws s3 ls (with credentials)
+    S3->>POD: 11. List of S3 buckets ✓
+    
+    Note over POD,PIA: Credentials auto-refresh every 15 minutes
+    Note over AUTH: Validates: Cluster + Namespace + ServiceAccount + IAM Role
+```
+
+### Diagram Explanation
+
+- **Pod Identity Agent**: **DaemonSet** running on every node that acts as a **credential proxy** between pods and **AWS STS**
+- **IAM Role Trust Policy**: Must trust **pods.eks.amazonaws.com** service principal, enabling EKS to assume roles on behalf of pods
+- **Pod Identity Association**: Maps **Kubernetes ServiceAccount** in a **namespace** to an **IAM role** via EKS control plane
+- **Webhook Mutation**: EKS **admission webhook** automatically injects **environment variables** and **token mounts** into pods using associated service accounts
+- **Credential Injection**: Pod receives **AWS_CONTAINER_CREDENTIALS_FULL_URI** pointing to PIA endpoint and **token file path** for authentication
+- **AssumeRoleForPodIdentity**: EKS-specific **STS API** that validates pod identity and returns **temporary IAM credentials** (15-min lifetime)
+- **No Code Changes**: Applications using **AWS SDK** automatically discover credentials via **default credential chain** - zero code modification needed
+- **Security Isolation**: Each pod gets **unique credentials** scoped to its service account, preventing **lateral movement** between workloads
+- **Auto-Refresh**: Pod Identity Agent **automatically refreshes** credentials before expiration, ensuring **uninterrupted access** to AWS services
+- **Simplified RBAC**: Replaces complex **IRSA annotations** with centralized **Pod Identity Associations** managed via EKS console or API
+
 ## Amazon EKS Pod Identity – High-Level Flow
 Amazon EKS Pod Identity enables pods in your cluster to securely assume IAM roles without managing static credentials or using IRSA annotations. The high-level flow is shown below:
 

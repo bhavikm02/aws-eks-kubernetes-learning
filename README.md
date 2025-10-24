@@ -7,6 +7,89 @@
 
 This comprehensive course covers AWS EKS (Elastic Kubernetes Service) from fundamentals to advanced production-ready deployments. Learn Docker, Kubernetes, AWS EKS, DevOps practices, Microservices architecture, Load Balancing, Storage, Autoscaling, Monitoring, and more through hands-on practical examples.
 
+## Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "AWS Cloud"
+        subgraph "EKS Cluster"
+            CP[EKS Control Plane]
+            subgraph "Worker Nodes"
+                WN1[EC2 Node Group]
+                WN2[Fargate Profiles]
+            end
+            subgraph "Networking"
+                ALB[Application Load Balancer]
+                NLB[Network Load Balancer]
+                CLB[Classic Load Balancer]
+            end
+        end
+        subgraph "Storage"
+            EBS[EBS Volumes]
+            RDS[RDS Database]
+            ECR[Container Registry]
+        end
+        subgraph "Monitoring & CI/CD"
+            CW[CloudWatch Container Insights]
+            XR[X-Ray Tracing]
+            CP2[CodePipeline]
+            CB[CodeBuild]
+        end
+        subgraph "DNS & Security"
+            R53[Route 53 - External DNS]
+            IAM[IAM Roles & Policies]
+        end
+    end
+    
+    DEV[Developer] --> |Push Code| GH[GitHub]
+    GH --> CP2
+    CP2 --> CB
+    CB --> ECR
+    CB --> |Deploy| CP
+    
+    CP --> WN1
+    CP --> WN2
+    WN1 --> EBS
+    WN1 --> RDS
+    WN2 --> RDS
+    
+    USER[End Users] --> ALB
+    USER --> NLB
+    ALB --> WN1
+    NLB --> WN1
+    
+    WN1 --> CW
+    WN2 --> CW
+    WN1 --> XR
+    
+    ALB --> R53
+    NLB --> R53
+    
+    IAM -.-> |Authorize| CP
+    IAM -.-> |Authorize| WN1
+
+    style CP fill:#FF9900
+    style EKS Cluster fill:#E8F4F8
+    style ALB fill:#8C4FFF
+    style NLB fill:#8C4FFF
+    style ECR fill:#FF9900
+    style CW fill:#FF4F8B
+    style RDS fill:#527FFF
+```
+
+### Diagram Explanation
+
+- **EKS Control Plane**: Managed by AWS, handles **API server**, **scheduler**, and **cluster orchestration** for Kubernetes workloads
+- **Worker Nodes**: Two deployment options - **EC2-based node groups** for traditional workloads and **Fargate profiles** for serverless containers
+- **Load Balancing Layer**: Three types of load balancers - **ALB** for HTTP/HTTPS routing, **NLB** for TCP/UDP traffic, and **CLB** for legacy applications
+- **Persistent Storage**: **EBS CSI Driver** provides block storage for pods, while **RDS** offers managed database services for stateful applications
+- **Container Registry**: **ECR** stores and manages Docker images with integrated **vulnerability scanning** and **lifecycle policies**
+- **CI/CD Pipeline**: **CodePipeline** orchestrates the build process, **CodeBuild** compiles and pushes images, enabling **automated deployments**
+- **Observability Stack**: **CloudWatch Container Insights** provides metrics and logs, **X-Ray** enables distributed tracing for microservices
+- **DNS Automation**: **External DNS** automatically creates **Route 53** records when Ingress or Service resources are deployed
+- **Security Model**: **IAM roles** and **service accounts** provide **fine-grained access control** using **IRSA** (IAM Roles for Service Accounts)
+- **Development Workflow**: Code flows from **GitHub** through **CI/CD pipeline** to **EKS cluster**, enabling **continuous delivery** and **rapid iteration**
+
 ### What You'll Learn
 - Create and manage AWS EKS clusters using eksctl
 - Docker and Kubernetes fundamentals

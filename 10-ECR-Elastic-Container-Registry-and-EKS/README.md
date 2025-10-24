@@ -1,5 +1,74 @@
 # AWS ECR - Elastic Container Registry Integration & EKS
 
+## ECR Integration Flow Diagram
+
+```mermaid
+graph TB
+    START([Local Development]) --> BUILD[Build Docker Image<br/>docker build -t app:1.0.0]
+    
+    BUILD --> ECR_CREATE[Create ECR Repository<br/>aws-ecr-kubenginx]
+    
+    ECR_CREATE --> AUTH[Authenticate Docker to ECR]
+    AUTH --> LOGIN[aws ecr get-login-password]
+    LOGIN --> DOCKER_LOGIN[docker login ECR]
+    
+    DOCKER_LOGIN --> TAG[Tag Image<br/>account.dkr.ecr.region.amazonaws.com/repo:tag]
+    TAG --> PUSH[Push to ECR<br/>docker push]
+    
+    PUSH --> SCAN[Image Scanning]
+    SCAN --> VULN[Vulnerability Assessment]
+    
+    VULN --> K8S[Update K8s Manifest]
+    K8S --> DEPLOY[Deploy to EKS<br/>kubectl apply]
+    
+    subgraph "ECR Repository"
+        ECR[ECR Registry]
+        ECR --> REPO[Repository: aws-ecr-kubenginx]
+        REPO --> IMAGES[Image Tags]
+        IMAGES --> V1[1.0.0]
+        IMAGES --> V2[2.0.0]
+        IMAGES --> LATEST[latest]
+    end
+    
+    PUSH --> REPO
+    
+    subgraph "EKS Cluster"
+        DEPLOY --> PODS[Pods]
+        PODS --> PULL[Pull Image from ECR]
+        PULL --> IAM[Node IAM Role]
+        IAM --> POLICY[AmazonEC2ContainerRegistryReadOnly]
+    end
+    
+    REPO --> PULL
+    
+    subgraph "ECR Features"
+        F1[Private Docker registry]
+        F2[Image encryption at rest]
+        F3[Image scanning]
+        F4[Lifecycle policies]
+        F5[Cross-region replication]
+        F6[IAM authentication]
+    end
+    
+    style ECR fill:#FF9900
+    style SCAN fill:#FF6B6B
+    style DEPLOY fill:#2E8B57
+    style POLICY fill:#4A90E2
+```
+
+### Diagram Explanation
+
+- **ECR Private Registry**: AWS-managed **Docker registry** with one registry per AWS account, stores images in **regional repositories**
+- **Docker Authentication**: Use **aws ecr get-login-password** piped to **docker login** for temporary authentication token (valid 12 hours)
+- **Image URI Format**: **account-id.dkr.ecr.region.amazonaws.com/repository-name:tag** uniquely identifies images across AWS
+- **Image Scanning**: **Vulnerability scanning** on push detects **CVEs** in image layers, provides severity ratings (critical, high, medium, low)
+- **Lifecycle Policies**: Automatically expire **old images** based on count or age, reducing **storage costs** and clutter
+- **IAM Integration**: Uses **IAM policies** for authentication, **no shared passwords**, integrates with **AWS account security**
+- **Node IAM Role**: EKS nodes need **AmazonEC2ContainerRegistryReadOnly** policy to pull images from ECR during pod creation
+- **Cross-Region Replication**: Replicate images to **multiple regions** for **disaster recovery** and **reduced latency**
+- **Encryption at Rest**: Images encrypted using **AES-256** with **AWS KMS** keys, configurable per repository
+- **Tag Immutability**: Enable **tag immutability** to prevent image tags from being overwritten, ensuring **deployment consistency**
+
 ## Step-01: What are we going to learn?
 - We are going build a Docker image 
 - Push to ECR Repository

@@ -1,8 +1,84 @@
 # Amazon EBS CSI Driver on EKS (with Pod Identity)
 
-## Step-00: What we’ll do
+## Installation Flow Diagram
 
-1. Install the **Amazon EBS CSI Driver** add-on (with IAM role via “Create recommended role”)
+```mermaid
+graph TB
+    START([Start Installation]) --> CONSOLE[Open EKS Console]
+    
+    CONSOLE --> ADDONS[Navigate to Add-ons]
+    ADDONS --> SEARCH[Search: Amazon EBS CSI Driver]
+    
+    SEARCH --> SELECT[Select aws-ebs-csi-driver]
+    SELECT --> IAM[Configure Permissions]
+    
+    IAM --> CREATE[Create recommended IAM role]
+    
+    CREATE --> TRUST[Set Trust Policy]
+    TRUST --> PRINCIPAL[Principal: pods.eks.amazonaws.com]
+    
+    CREATE --> POLICY[Attach Policies]
+    POLICY --> POL1[AmazonEBSCSIDriverPolicy]
+    POLICY --> POL2[AmazonEKSClusterPolicy]
+    
+    PRINCIPAL --> INSTALL[Click Create/Install]
+    POL1 --> INSTALL
+    POL2 --> INSTALL
+    
+    INSTALL --> DEPLOY[Deploy CSI Components]
+    
+    DEPLOY --> CONTROLLER[EBS CSI Controller<br/>Deployment: 2 replicas]
+    DEPLOY --> NODE[EBS CSI Node<br/>DaemonSet: All nodes]
+    
+    CONTROLLER --> PODS1[Controller Pods Running]
+    NODE --> PODS2[Node Pods Running]
+    
+    PODS1 --> VERIFY[Verification]
+    PODS2 --> VERIFY
+    
+    VERIFY --> CMD1[kubectl get pods -n kube-system]
+    VERIFY --> CMD2[kubectl get ds -n kube-system]
+    VERIFY --> CMD3[kubectl get deploy -n kube-system]
+    
+    CMD1 --> CHECK1{Pods Running?}
+    CMD2 --> CHECK2{DaemonSet Ready?}
+    CMD3 --> CHECK3{Deployment Ready?}
+    
+    CHECK1 -->|Yes| SUCCESS([Installation Complete])
+    CHECK2 -->|Yes| SUCCESS
+    CHECK3 -->|Yes| SUCCESS
+    
+    CHECK1 -->|No| TROUBLESHOOT[Check logs & events]
+    CHECK2 -->|No| TROUBLESHOOT
+    CHECK3 -->|No| TROUBLESHOOT
+    
+    TROUBLESHOOT --> LOGS[kubectl logs -n kube-system]
+    LOGS --> EVENTS[kubectl describe pods]
+    
+    style START fill:#90EE90
+    style CREATE fill:#FFD700
+    style CONTROLLER fill:#FF9900
+    style NODE fill:#FF9900
+    style SUCCESS fill:#90EE90
+    style TROUBLESHOOT fill:#FF6B6B
+```
+
+### Diagram Explanation
+
+- **EKS Add-on Installation**: Simplified **one-click deployment** via EKS console, automatically handles **IAM** and **pod configurations**
+- **Recommended IAM Role**: EKS creates **IAM role** with trust policy for **pods.eks.amazonaws.com** and attaches required **EBS policies**
+- **AmazonEBSCSIDriverPolicy**: Managed policy granting permissions for **CreateVolume**, **AttachVolume**, **DeleteVolume**, **DescribeVolumes** operations
+- **CSI Controller Deployment**: Runs **2 replicas** (for high availability) handling **volume lifecycle** operations via AWS EBS API
+- **CSI Node DaemonSet**: Runs on **every worker node**, manages **device mounting**, **filesystem formatting**, and **volume attachment** to pods
+- **Pod Identity Integration**: CSI driver pods automatically receive **temporary IAM credentials** via Pod Identity Agent, no manual configuration needed
+- **Multi-Container Pods**: Controller pods run **6 containers** (provisioner, attacher, snapshotter, resizer, liveness probe, node driver registrar)
+- **Node Driver Registrar**: Registers **CSI driver** with kubelet on each node, enabling volume mount/unmount operations
+- **Verification Commands**: Check pod status in **kube-system namespace** to confirm **controller** and **node pods** are running successfully
+- **Troubleshooting**: If pods fail, check **logs** and **describe events** to identify issues with IAM permissions or cluster configuration
+
+## Step-00: What we'll do
+
+1. Install the **Amazon EBS CSI Driver** add-on (with IAM role via "Create recommended role")
 2. Verify installation using `kubectl`
 
 ---
