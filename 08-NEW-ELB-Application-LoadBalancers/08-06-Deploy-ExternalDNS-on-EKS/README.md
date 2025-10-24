@@ -3,6 +3,100 @@ title: AWS Load Balancer Controller - External DNS Install
 description: Learn AWS Load Balancer Controller - External DNS Install
 ---
 
+## External DNS Architecture Diagram
+
+```mermaid
+graph TB
+    ING[Ingress or Service<br/>with hostname annotation] --> EXTDNS[External DNS Pod]
+    
+    EXTDNS -->|Watch K8s API| API[Kubernetes API Server]
+    API -->|List Ingress/Service| EXTDNS
+    
+    EXTDNS -->|Extract hostname| HOSTNAME[Annotation:<br/>external-dns.alpha.kubernetes.io/hostname]
+    
+    HOSTNAME --> ALB_DNS[Get Load Balancer DNS<br/>example-123.us-east-1.elb.amazonaws.com]
+    
+    EXTDNS -->|Create/Update DNS Record| R53[AWS Route53<br/>Hosted Zone]
+    
+    R53 -->|DNS Record| RECORD[A Record: app.example.com<br/>ALIAS → ALB DNS]
+    
+    subgraph "External DNS Flow"
+        WATCH[1. Watch Resources]
+        EXTRACT[2. Extract DNS Annotations]
+        COMPARE[3. Compare with Route53]
+        SYNC[4. Create/Update/Delete Records]
+        
+        WATCH --> EXTRACT
+        EXTRACT --> COMPARE
+        COMPARE --> SYNC
+    end
+    
+    EXTDNS --> WATCH
+    
+    subgraph "IAM Configuration"
+        SA[ServiceAccount<br/>external-dns]
+        ROLE[IAM Role<br/>IRSA]
+        POLICY[IAM Policy<br/>AllowExternalDNSUpdates]
+        
+        SA -->|Assumes| ROLE
+        ROLE -->|Has| POLICY
+        
+        POLICY --> PERM1[route53:ChangeResourceRecordSets]
+        POLICY --> PERM2[route53:ListHostedZones]
+        POLICY --> PERM3[route53:ListResourceRecordSets]
+    end
+    
+    EXTDNS -.->|Uses| SA
+    
+    subgraph "Annotation Examples"
+        ANN1[external-dns.alpha.kubernetes.io/hostname: app.example.com]
+        ANN2[external-dns.alpha.kubernetes.io/ttl: 300]
+    end
+    
+    subgraph "External DNS Config"
+        SOURCE[--source: ingress, service]
+        PROVIDER[--provider: aws]
+        DOMAIN[--domain-filter: example.com]
+        POLICY_SYNC[--policy: sync]
+        TXT[--txt-owner-id: eks-cluster-id]
+    end
+    
+    EXTDNS --> SOURCE
+    EXTDNS --> PROVIDER
+    
+    subgraph "DNS Record Types"
+        A_RECORD[A Record: IPv4]
+        CNAME_RECORD[CNAME: Alias]
+        ALIAS_RECORD[ALIAS: AWS-specific]
+        TXT_RECORD[TXT: Ownership tracking]
+    end
+    
+    R53 --> ALIAS_RECORD
+    R53 --> TXT_RECORD
+    
+    USER[End User] -->|DNS Lookup| R53
+    R53 -->|Returns| ALB[Application Load Balancer]
+    ALB -->|Routes to| PODS[Kubernetes Pods]
+    
+    style EXTDNS fill:#4A90E2
+    style R53 fill:#FF9900
+    style ROLE fill:#2E8B57
+    style ALB fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **External DNS Pod**: Watches **Ingress and Service resources** with hostname annotations, automatically creates DNS records in Route53
+- **IRSA (IAM Roles for Service Accounts)**: External DNS uses **ServiceAccount** with IAM role to authenticate with AWS Route53
+- **Hostname Annotation**: `external-dns.alpha.kubernetes.io/hostname` specifies **desired DNS name** for the resource
+- **Route53 Integration**: External DNS calls **Route53 API** to create/update/delete A, CNAME, or ALIAS records
+- **TXT Record Ownership**: Creates **TXT records** to track which records it manages, prevents conflicts with other DNS controllers
+- **Sync Policy**: With **--policy sync**, External DNS manages full lifecycle (create, update, delete) of DNS records
+- **Domain Filter**: `--domain-filter` restricts External DNS to **specific hosted zones**, prevents unintended changes
+- **ALIAS Records**: For AWS ALB/NLB, uses **ALIAS records** instead of CNAME for better performance and AWS integration
+- **Automatic Cleanup**: When Ingress/Service is **deleted**, External DNS automatically removes corresponding DNS records
+- **TTL Configuration**: Optional **TTL annotation** controls how long DNS resolvers cache the record (default 300 seconds)
+
 ## Step-01: Introduction
 - **External DNS:** Used for Updating Route53 RecordSets from Kubernetes 
 - We need to create IAM Policy, k8s Service Account & IAM Role and associate them together for external-dns pod to add or remove entries in AWS Route53 Hosted Zones. 

@@ -1,5 +1,84 @@
 # EKS - Cluster Autoscaler
 
+## Cluster Autoscaler Architecture Diagram
+
+```mermaid
+graph TB
+    POD[New Pod Created] --> SCHED[Scheduler]
+    SCHED -->|Try to Place| NODE{Available Node<br/>with Resources?}
+    
+    NODE -->|Yes| PLACED[Pod Scheduled]
+    NODE -->|No| PENDING[Pod: Pending State]
+    
+    PENDING -->|Detected by| CA[Cluster Autoscaler<br/>Deployment]
+    
+    CA -->|Check| ASG_TAGS[Auto Scaling Group Tags<br/>k8s.io/cluster-autoscaler/enabled<br/>k8s.io/cluster-autoscaler/eksdemo1]
+    
+    ASG_TAGS -->|Found| EVALUATE{Can Scaling Help?}
+    
+    EVALUATE -->|Yes| SCALE_UP[Scale Up Decision]
+    EVALUATE -->|No| WAIT[Wait & Retry]
+    
+    SCALE_UP -->|Call AWS API| ASG[Auto Scaling Group]
+    ASG -->|Increase Desired Capacity| EC2_API[Launch EC2 Instances]
+    
+    EC2_API -->|New Node| NEW_NODE[New Worker Node]
+    NEW_NODE -->|Join Cluster| KUBELET[Node Ready]
+    
+    KUBELET -->|Node Available| SCHED
+    SCHED -->|Reschedule| PLACED
+    
+    subgraph "Scale Down Logic"
+        CA -->|Monitor| UTIL[Node Utilization]
+        UTIL -->|< 50% for 10min| UNDERUSED[Underutilized Node]
+        UNDERUSED -->|Check| EVICTABLE{All Pods<br/>Can Relocate?}
+        EVICTABLE -->|Yes| DRAIN[Drain Node]
+        EVICTABLE -->|No| KEEP[Keep Node]
+        DRAIN -->|Terminate| ASG_DOWN[Decrease ASG Capacity]
+    end
+    
+    subgraph "Cluster Autoscaler Config"
+        DISCOVER[Auto-Discovery<br/>via ASG Tags]
+        BALANCE[--balance-similar-node-groups]
+        SKIP[--skip-nodes-with-system-pods=false]
+        EXPANDER[--expander=least-waste]
+    end
+    
+    subgraph "IAM Permissions"
+        IAM_ROLE[Node IAM Role]
+        IAM_ROLE --> AUTOSCALING_POLICY[AutoScaling Policy]
+        AUTOSCALING_POLICY --> ACTIONS[DescribeAutoScalingGroups<br/>SetDesiredCapacity<br/>TerminateInstanceInAutoScalingGroup]
+    end
+    
+    CA -.->|Uses| IAM_ROLE
+    CA -.->|Uses| DISCOVER
+    
+    subgraph "Scaling Triggers"
+        T1[Pending pods due to resources]
+        T2[Node utilization < 50%]
+        T3[Pods can be rescheduled]
+    end
+    
+    style CA fill:#4A90E2
+    style SCALE_UP fill:#FF6B6B
+    style DRAIN fill:#FFD700
+    style NEW_NODE fill:#90EE90
+    style PENDING fill:#FF9900
+```
+
+### Diagram Explanation
+
+- **Pending Pod Detection**: Cluster Autoscaler **monitors** for pods in Pending state due to **insufficient node resources**
+- **Auto-Discovery**: Uses **ASG tags** to automatically discover node groups, no manual configuration of min/max nodes needed
+- **Scale Up Decision**: Simulates pod **placement on potential nodes** to determine if adding nodes would help schedule pending pods
+- **AWS Integration**: Calls **Auto Scaling Group API** to increase desired capacity, triggering **EC2 instance launch**
+- **Node Join Time**: Takes **2-3 minutes** for new node to boot, join cluster, and become ready for pod scheduling
+- **Scale Down Threshold**: Removes nodes when utilization drops below **50% for 10+ minutes**, ensuring stable operation
+- **Pod Eviction Safety**: Before draining node, checks if pods can be **rescheduled elsewhere**, respects **PodDisruptionBudgets**
+- **System Pods Handling**: `--skip-nodes-with-system-pods=false` allows scaling down nodes with kube-system pods (except DNS)
+- **Balance Node Groups**: `--balance-similar-node-groups` distributes nodes evenly across **multiple AZs** for high availability
+- **IAM Policy Required**: Node group needs **AutoScaling permissions** created via eksctl `--asg-access` flag during cluster creation
+
 ## Step-01: Introduction
 - The Kubernetes Cluster Autoscaler automatically adjusts the number of nodes in your cluster when pods fail to launch due to lack of resources or when nodes in the cluster are underutilized and their pods can be rescheduled onto other nodes in the cluster.
 

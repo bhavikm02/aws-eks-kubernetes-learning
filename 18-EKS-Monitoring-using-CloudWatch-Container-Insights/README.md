@@ -1,5 +1,110 @@
 # Monitoring EKS using CloudWatch Container Insigths
 
+## CloudWatch Container Insights Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "EKS Cluster"
+        subgraph "Worker Node 1"
+            POD1[Application Pods]
+            KUBELET1[kubelet<br/>cAdvisor]
+            CW_AGENT1[CloudWatch Agent<br/>DaemonSet]
+            FLUENTD1[Fluentd<br/>DaemonSet]
+        end
+        
+        subgraph "Worker Node 2"
+            POD2[Application Pods]
+            KUBELET2[kubelet<br/>cAdvisor]
+            CW_AGENT2[CloudWatch Agent<br/>DaemonSet]
+            FLUENTD2[Fluentd<br/>DaemonSet]
+        end
+        
+        POD1 -->|Metrics| KUBELET1
+        POD1 -->|Stdout/Stderr| DOCKER_LOG1[Container Logs]
+        
+        KUBELET1 -->|Scrape| CW_AGENT1
+        DOCKER_LOG1 -->|Read| FLUENTD1
+        
+        POD2 -->|Metrics| KUBELET2
+        POD2 -->|Stdout/Stderr| DOCKER_LOG2[Container Logs]
+        
+        KUBELET2 -->|Scrape| CW_AGENT2
+        DOCKER_LOG2 -->|Read| FLUENTD2
+    end
+    
+    subgraph "Amazon CloudWatch"
+        CW_AGENT1 -->|Send Metrics| CW_METRICS[CloudWatch Metrics]
+        CW_AGENT2 -->|Send Metrics| CW_METRICS
+        
+        FLUENTD1 -->|Send Logs| CW_LOGS[CloudWatch Logs]
+        FLUENTD2 -->|Send Logs| CW_LOGS
+        
+        CW_METRICS --> METRICS_TYPES[Metric Types]
+        METRICS_TYPES --> M1[CPU Utilization]
+        METRICS_TYPES --> M2[Memory Utilization]
+        METRICS_TYPES --> M3[Network I/O]
+        METRICS_TYPES --> M4[Disk I/O]
+        METRICS_TYPES --> M5[Pod/Container Count]
+        
+        CW_LOGS --> LOG_GROUPS[Log Groups]
+        LOG_GROUPS --> LG1[/aws/containerinsights/cluster/application]
+        LOG_GROUPS --> LG2[/aws/containerinsights/cluster/dataplane]
+        LOG_GROUPS --> LG3[/aws/containerinsights/cluster/host]
+        LOG_GROUPS --> LG4[/aws/containerinsights/cluster/performance]
+    end
+    
+    subgraph "CloudWatch Features"
+        DASHBOARD[Container Insights Dashboard]
+        INSIGHTS_Q[CloudWatch Logs Insights<br/>Query Language]
+        ALARMS[CloudWatch Alarms]
+        SNS[SNS Notifications]
+    end
+    
+    CW_METRICS --> DASHBOARD
+    CW_LOGS --> DASHBOARD
+    CW_LOGS --> INSIGHTS_Q
+    CW_METRICS --> ALARMS
+    ALARMS --> SNS
+    
+    subgraph "IAM Permissions"
+        NODE_ROLE[Worker Node IAM Role]
+        NODE_ROLE --> CW_POLICY[CloudWatchAgentServerPolicy]
+        CW_POLICY --> PERMS[PutMetricData<br/>CreateLogGroup<br/>PutLogEvents]
+    end
+    
+    CW_AGENT1 -.->|Uses| NODE_ROLE
+    FLUENTD1 -.->|Uses| NODE_ROLE
+    
+    subgraph "Sample Queries"
+        Q1[Average Node CPU]
+        Q2[Container Restarts]
+        Q3[Pod Failures]
+        Q4[Error Log Count]
+    end
+    
+    INSIGHTS_Q --> Q1
+    INSIGHTS_Q --> Q2
+    
+    style CW_AGENT1 fill:#FF9900
+    style FLUENTD1 fill:#4A90E2
+    style CW_METRICS fill:#FF6B6B
+    style CW_LOGS fill:#2E8B57
+    style DASHBOARD fill:#9B59B6
+```
+
+### Diagram Explanation
+
+- **CloudWatch Agent DaemonSet**: Runs on **every node**, scrapes metrics from **kubelet cAdvisor** and sends to CloudWatch Metrics
+- **Fluentd DaemonSet**: Collects **container logs** from /var/log/containers, enriches with Kubernetes metadata, sends to CloudWatch Logs
+- **Container Insights Dashboard**: Pre-built **visual dashboard** showing cluster, node, pod, and container-level metrics automatically
+- **Performance Metrics**: Tracks **CPU**, **memory**, **network**, **disk I/O** at cluster, node, namespace, pod, and container levels
+- **Log Groups Structure**: Organizes logs into **application** (stdout/stderr), **dataplane** (kubelet/kube-proxy), **host** (system), **performance** (metrics)
+- **CloudWatch Logs Insights**: Query language for **searching and analyzing** logs with aggregations, filters, and visualizations
+- **Metric Filters**: Extract **custom metrics** from log patterns, create alarms on application-specific events
+- **IAM Role Required**: Worker nodes need **CloudWatchAgentServerPolicy** to write metrics and logs to CloudWatch
+- **Cost Optimization**: Consider **log retention policies** and **metric resolution** to manage costs, use sampling for high-volume applications
+- **Alerting Integration**: Create **CloudWatch Alarms** on metrics, send notifications to **SNS** for email/SMS, integrate with PagerDuty/Slack
+
 ## Step-01: Introduction
 - What is CloudWatch?
 - What are CloudWatch Container Insights?

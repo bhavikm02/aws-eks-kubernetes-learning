@@ -3,6 +3,91 @@ title: AWS Load Balancer Controller - NLB Basics
 description: Learn to use AWS Network Load Balancer with AWS Load Balancer Controller
 ---
 
+## NLB with Load Balancer Controller Diagram
+
+```mermaid
+graph TB
+    USER[Client Request] -->|TCP/UDP| NLB[AWS Network Load Balancer<br/>Layer 4]
+    
+    NLB -->|Target: IP Mode| POD1[Pod IP: 192.168.1.10]
+    NLB -->|Target: IP Mode| POD2[Pod IP: 192.168.1.11]
+    NLB -->|Target: IP Mode| POD3[Pod IP: 192.168.1.12]
+    
+    subgraph "EKS Cluster"
+        subgraph "Worker Node 1"
+            POD1[Nginx Pod 1]
+        end
+        subgraph "Worker Node 2"
+            POD2[Nginx Pod 2]
+        end
+        subgraph "Worker Node 3"
+            POD3[Nginx Pod 3]
+        end
+        
+        SVC[LoadBalancer Service<br/>Type: LoadBalancer]
+        SVC -.->|Selects| POD1
+        SVC -.->|Selects| POD2
+        SVC -.->|Selects| POD3
+    end
+    
+    subgraph "AWS Load Balancer Controller"
+        LBC[Controller Pod<br/>watches Services]
+        LBC -->|Reconcile| SVC
+        LBC -->|Create/Update| NLB
+        LBC -->|Register Targets| TG[Target Group<br/>Target Type: IP]
+    end
+    
+    NLB --> TG
+    TG --> POD1
+    TG --> POD2
+    TG --> POD3
+    
+    subgraph "NLB Key Annotations"
+        ANNO1[service.beta.kubernetes.io/aws-load-balancer-type: external]
+        ANNO2[service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip]
+        ANNO3[service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing]
+        ANNO4[service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: true]
+        ANNO5[service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: HTTP]
+    end
+    
+    SVC --> ANNO1
+    SVC --> ANNO2
+    
+    subgraph "NLB Features"
+        F1[Ultra-low latency]
+        F2[Millions requests/sec]
+        F3[Static IP per AZ]
+        F4[Preserve source IP]
+        F5[TCP/UDP/TLS traffic]
+    end
+    
+    NLB -.->|Capabilities| F1
+    NLB -.->|Capabilities| F2
+    
+    subgraph "Target Types"
+        INSTANCE[Instance Mode<br/>NodePort on Workers]
+        IP_MODE[IP Mode<br/>Direct to Pod IPs]
+    end
+    
+    style NLB fill:#FF9900
+    style LBC fill:#4A90E2
+    style SVC fill:#2E8B57
+    style TG fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **Load Balancer Controller**: Watches **Service resources** with type `LoadBalancer`, automatically creates/updates NLB in AWS
+- **Target Type IP**: NLB sends traffic **directly to pod IPs**, bypassing NodePort for better performance and efficiency
+- **Target Type Instance**: Alternative mode where NLB targets **worker node IPs** with NodePort, adds extra hop
+- **Cross-Zone Load Balancing**: Distributes traffic **evenly across all AZs**, improves availability and resource utilization
+- **Source IP Preservation**: NLB maintains **client source IP** when routing to pods, useful for access logs and security
+- **Static IP per AZ**: Each AZ gets a **static IP address**, enables whitelisting and DNS stability
+- **Health Checks**: Configured at **Target Group level**, supports HTTP/HTTPS/TCP protocols for pod health verification
+- **Scheme Options**: **internet-facing** (public subnets) or **internal** (private subnets) for different use cases
+- **Protocol Support**: Handles **TCP**, **UDP**, **TLS** traffic at Layer 4, no HTTP-specific features like path routing
+- **Controller Annotations**: Uses **AWS-specific annotations** on Service to configure NLB behavior and features
+
 ## Step-01: Introduction
 - Understand more about 
   - **AWS Cloud Provider Load Balancer Controller (Legacy):** Creates AWS CLB and NLB

@@ -3,6 +3,106 @@ title: AWS Load Balancer Ingress SSL
 description: Learn AWS Load Balancer Controller - Ingress SSL
 ---
 
+## ALB Ingress SSL Diagram
+
+```mermaid
+graph TB
+    USER[Client Browser] -->|HTTPS Request<br/>Port 443| ALB[Application Load Balancer]
+    USER -.->|HTTP Request<br/>Port 80| ALB
+    
+    ALB -->|TLS Handshake| CERT[ACM Certificate<br/>*.yourdomain.com]
+    
+    subgraph "ALB Listeners"
+        HTTPS_LIST[Listener: Port 443<br/>Protocol: HTTPS]
+        HTTP_LIST[Listener: Port 80<br/>Protocol: HTTP]
+        
+        HTTPS_LIST -->|TLS Termination| DECRYPT[Decrypt Traffic]
+        HTTP_LIST -->|Plain HTTP| FORWARD[Forward to Targets]
+        
+        DECRYPT --> FORWARD
+    end
+    
+    ALB --> HTTPS_LIST
+    ALB --> HTTP_LIST
+    
+    FORWARD -->|NodePort| TG[Target Group<br/>Worker Nodes]
+    
+    subgraph "EKS Cluster"
+        TG -->|Route to Pods| PODS[Application Pods]
+        
+        ING[Ingress Resource]
+        SVC[NodePort Service]
+        
+        ING -->|Backend| SVC
+        SVC -.->|Selects| PODS
+    end
+    
+    subgraph "SSL Annotations"
+        SSL1[alb.ingress.kubernetes.io/listen-ports<br/>[HTTPS:443, HTTP:80]]
+        SSL2[alb.ingress.kubernetes.io/certificate-arn<br/>ACM Certificate ARN]
+        SSL3[alb.ingress.kubernetes.io/ssl-policy<br/>ELBSecurityPolicy-TLS-1-1-2017-01]
+    end
+    
+    ING --> SSL1
+    ING --> SSL2
+    
+    subgraph "AWS Certificate Manager"
+        ACM[ACM Service]
+        ACM --> REQ[Request Public Certificate]
+        REQ --> WILDCARD[Domain: *.yourdomain.com]
+        WILDCARD --> DNS_VAL[DNS Validation]
+        DNS_VAL --> R53[Create Record in Route53]
+        R53 --> ISSUED[Certificate Issued]
+        ISSUED --> AUTO_RENEW[Auto-renewal enabled]
+    end
+    
+    CERT -.->|Managed by| ACM
+    
+    subgraph "Certificate Validation Flow"
+        V1[1. Request certificate in ACM]
+        V2[2. Add domain names]
+        V3[3. Choose DNS validation]
+        V4[4. Create CNAME record in Route53]
+        V5[5. Wait 5-10 minutes for validation]
+        V6[6. Certificate status: Issued]
+        
+        V1 --> V2 --> V3 --> V4 --> V5 --> V6
+    end
+    
+    subgraph "Security Features"
+        TLS_VER[TLS 1.2 / 1.3 support]
+        CIPHER[Strong cipher suites]
+        SNI[SNI support for multi-domain]
+        HSTS[HSTS headers optional]
+    end
+    
+    subgraph "Traffic Flow"
+        T1[Client → HTTPS:443 → ALB]
+        T2[ALB → Decrypt with ACM Cert]
+        T3[ALB → HTTP:80 → Pods]
+        T4[End-to-end: HTTPS to HTTP]
+    end
+    
+    style ALB fill:#FF9900
+    style CERT fill:#2E8B57
+    style ING fill:#4A90E2
+    style ACM fill:#FFD700
+    style HTTPS_LIST fill:#9B59B6
+```
+
+### Diagram Explanation
+
+- **ACM Certificate**: **AWS Certificate Manager** provides free SSL/TLS certificates with automatic renewal, supports wildcard domains
+- **TLS Termination**: ALB **decrypts HTTPS traffic** using ACM certificate, forwards plain HTTP to backend pods
+- **Dual Listeners**: ALB configured with **both HTTP (80) and HTTPS (443)** listeners for flexibility
+- **DNS Validation**: Certificate validation via **Route53 CNAME record**, automated by clicking "Create record in Route53"
+- **Wildcard Certificate**: `*.yourdomain.com` covers **all subdomains** (app1.yourdomain.com, app2.yourdomain.com, etc.)
+- **SSL Policy**: Controls **TLS versions and cipher suites**, default is ELBSecurityPolicy-2016-08, optional to override
+- **Certificate ARN**: Unique **Amazon Resource Name** for certificate, referenced in Ingress annotation
+- **Automatic Renewal**: ACM automatically **renews certificates** 60 days before expiration, no manual intervention
+- **SNI Support**: ALB supports **multiple certificates** via Server Name Indication for different hostnames
+- **Zero-Cost SSL**: ACM certificates are **free for ALB/NLB**, only pay for load balancer usage
+
 ## Step-01: Introduction
 - We are going to register a new DNS in AWS Route53
 - We are going to create a SSL certificate 

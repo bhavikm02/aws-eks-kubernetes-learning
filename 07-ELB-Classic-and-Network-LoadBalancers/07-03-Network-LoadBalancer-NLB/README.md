@@ -1,5 +1,111 @@
  # AWS - Network Load Balancer - NLB
 
+## Network Load Balancer (Legacy) Diagram
+
+```mermaid
+graph TB
+    USER[Client Request] -->|TCP/UDP| NLB[Network Load Balancer<br/>Created by Cloud Provider]
+    
+    NLB -->|NodePort| NODE1[Worker Node 1<br/>NodePort: 31XXX]
+    NLB -->|NodePort| NODE2[Worker Node 2<br/>NodePort: 31XXX]
+    NLB -->|NodePort| NODE3[Worker Node 3<br/>NodePort: 31XXX]
+    
+    subgraph "EKS Cluster"
+        subgraph "Worker Node 1"
+            NODE1 -->|kube-proxy| POD1[App Pod]
+        end
+        
+        subgraph "Worker Node 2"
+            NODE2 -->|kube-proxy| POD2[App Pod]
+        end
+        
+        subgraph "Worker Node 3"
+            NODE3 -->|kube-proxy| POD3[App Pod]
+        end
+        
+        SVC[Service Type: LoadBalancer<br/>with NLB annotation]
+        SVC -.->|Selects| POD1
+        SVC -.->|Selects| POD2
+        SVC -.->|Selects| POD3
+    end
+    
+    subgraph "Service Manifest"
+        YAML[type: LoadBalancer]
+        YAML --> PORT[port: 80]
+        YAML --> TARGET[targetPort: 8095]
+        YAML --> ANNO[annotation:<br/>aws-load-balancer-type: nlb]
+    end
+    
+    SVC --> YAML
+    
+    subgraph "Legacy Cloud Provider vs AWS LB Controller"
+        LEGACY[Legacy Cloud Provider<br/>In-tree driver]
+        LEGACY --> L_ANNO[annotation: nlb]
+        LEGACY --> L_TARGET[Target Type: instance only]
+        LEGACY --> L_FEATURES[Limited features]
+        
+        MODERN[AWS Load Balancer Controller<br/>Out-of-tree CSI]
+        MODERN --> M_ANNO[annotation: external]
+        MODERN --> M_TARGET[Target Type: ip or instance]
+        MODERN --> M_FEATURES[Full feature set]
+        MODERN --> M_INGRESS[Also supports Ingress]
+    end
+    
+    subgraph "NLB Features"
+        F1[Layer 4 TCP/UDP/TLS]
+        F2[High performance]
+        F3[Ultra-low latency]
+        F4[Millions requests/sec]
+        F5[Static IP per AZ]
+        F6[Preserve source IP]
+        F7[Cross-zone load balancing]
+    end
+    
+    subgraph "Legacy vs Modern Annotation"
+        OLD_ANNO[service.beta.kubernetes.io/aws-load-balancer-type: nlb<br/>Legacy Cloud Provider]
+        NEW_ANNO[service.beta.kubernetes.io/aws-load-balancer-type: external<br/>service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: instance/ip<br/>AWS Load Balancer Controller]
+    end
+    
+    subgraph "Migration Recommendation"
+        CURRENT[Current: Legacy NLB<br/>Cloud Provider]
+        CURRENT --> MIGRATE[Migrate to AWS LB Controller]
+        MIGRATE --> BENEFITS[Benefits:<br/>- Target type IP<br/>- More annotations<br/>- Better features<br/>- Active development]
+    end
+    
+    subgraph "NLB Target Types"
+        INST[Instance Mode<br/>Targets: Worker Nodes<br/>Port: NodePort<br/>Legacy default]
+        IP[IP Mode<br/>Targets: Pod IPs<br/>Port: Container Port<br/>Requires LB Controller]
+    end
+    
+    subgraph "Use Cases"
+        UC1[TCP/UDP applications]
+        UC2[Extreme performance needs]
+        UC3[Static IP requirements]
+        UC4[Non-HTTP protocols]
+        UC5[Gaming servers]
+        UC6[IoT applications]
+    end
+    
+    style NLB fill:#FF9900
+    style SVC fill:#2E8B57
+    style POD1 fill:#90EE90
+    style MODERN fill:#2E8B57
+    style LEGACY fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **Legacy Cloud Provider NLB**: Created by Kubernetes **in-tree cloud provider** with annotation `service.beta.kubernetes.io/aws-load-balancer-type: nlb`
+- **Target Type Instance Only**: Legacy NLB supports **instance mode** only, routes to worker node IPs on NodePort
+- **Modern Alternative**: **AWS Load Balancer Controller** (separate pod) provides more features including IP target type
+- **NLB Annotation**: Single annotation `aws-load-balancer-type: nlb` creates NLB instead of default CLB
+- **Layer 4 Only**: NLB operates at **TCP/UDP layer**, no HTTP-specific features, ideal for non-HTTP protocols
+- **High Performance**: Handles **millions of requests per second** with ultra-low latency, better than CLB/ALB
+- **Static IP per AZ**: Each AZ gets **static IP address**, useful for IP whitelisting and firewall rules
+- **Source IP Preservation**: Maintains **client source IP** when routing to backends, useful for logging and security
+- **Migration Path**: Recommend **migrating to AWS Load Balancer Controller** for target-type IP and advanced features
+- **Limited Features**: Legacy cloud provider NLB has **fewer configuration options** compared to Load Balancer Controller version
+
 ## Step-01: Create AWS Network Load Balancer Kubernetes Manifest & Deploy
 - **04-NetworkLoadBalancer.yml**
 ```yml

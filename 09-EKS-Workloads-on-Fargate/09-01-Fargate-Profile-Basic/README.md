@@ -1,5 +1,117 @@
 # EKS Fargate Profiles - Basics
 
+## Fargate Profile Architecture Diagram
+
+```mermaid
+graph TB
+    USER[User Request] -->|HTTP/HTTPS| ALB[Application Load Balancer]
+    
+    ALB -->|Target Type: IP| FP1[Fargate Pod IP]
+    ALB -->|Target Type: IP| FP2[Fargate Pod IP]
+    
+    subgraph "EKS Cluster"
+        subgraph "Managed Node Group<br/>Private Subnets"
+            LBC[AWS LB Controller Pod]
+            EXTDNS[External DNS Pod]
+            COREDNS[CoreDNS]
+            KPROXY[kube-proxy]
+        end
+        
+        subgraph "Fargate Profile<br/>Private Subnets"
+            PROFILE[Fargate Profile<br/>Namespace Selector]
+            
+            subgraph "Fargate Pod 1"
+                FP1[App Pod]
+                FARGATE_AGENT1[Fargate Agent<br/>kubelet]
+            end
+            
+            subgraph "Fargate Pod 2"
+                FP2[App Pod]
+                FARGATE_AGENT2[Fargate Agent<br/>kubelet]
+            end
+            
+            PROFILE -.->|Matches| FP1
+            PROFILE -.->|Matches| FP2
+        end
+        
+        ING[Ingress Resource<br/>target-type: ip]
+        SVC[Service<br/>Type: NodePort]
+        
+        ING -->|Backend| SVC
+        SVC -.->|Selects| FP1
+        SVC -.->|Selects| FP2
+        
+        LBC -->|Watches| ING
+        LBC -->|Creates| ALB
+    end
+    
+    subgraph "Fargate Profile Configuration"
+        SELECTOR[Selector]
+        SELECTOR --> NAMESPACE[namespace: fpdev]
+        SELECTOR --> LABELS[labels: app: nginx]
+        
+        SUBNETS[Subnets: Private only]
+        POD_ROLE[Pod Execution Role<br/>IAM Role]
+    end
+    
+    PROFILE --> SELECTOR
+    PROFILE --> SUBNETS
+    PROFILE --> POD_ROLE
+    
+    subgraph "Key Differences: Fargate vs EC2"
+        DIFF1[No Node Ports - Direct IP routing]
+        DIFF2[No SSH access to nodes]
+        DIFF3[Pod-level isolation]
+        DIFF4[Automatic scaling per pod]
+        DIFF5[No DaemonSets on Fargate]
+        DIFF6[Higher per-pod cost vs shared nodes]
+    end
+    
+    subgraph "Fargate Characteristics"
+        CHAR1[Serverless compute]
+        CHAR2[Right-sized vCPU & Memory]
+        CHAR3[Isolated tenant environment]
+        CHAR4[No capacity planning]
+        CHAR5[Pay-per-pod]
+    end
+    
+    subgraph "Target Type IP Benefits"
+        IP1[Direct routing to pod]
+        IP2[No NodePort overhead]
+        IP3[Better performance]
+        IP4[Simplified networking]
+    end
+    
+    subgraph "Fargate Pod Execution Flow"
+        SCHEDULE[Pod Scheduled]
+        SCHEDULE --> FARGATE_CREATE[Fargate creates isolated VM]
+        FARGATE_CREATE --> POD_START[Start pod containers]
+        POD_START --> READY[Pod Ready]
+        READY --> TERMINATE[Pod terminates]
+        TERMINATE --> FARGATE_DELETE[Fargate deletes VM]
+    end
+    
+    style ALB fill:#FF9900
+    style PROFILE fill:#4A90E2
+    style FP1 fill:#9B59B6
+    style FP2 fill:#9B59B6
+    style LBC fill:#2E8B57
+    style ING fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **Fargate Profile**: Defines **namespace/label selectors** that match pods to run on Fargate, pods matching criteria launch on Fargate instead of EC2
+- **Serverless Pods**: Each Fargate pod runs in **isolated micro-VM**, no shared node infrastructure, automatic right-sizing per pod spec
+- **Target Type IP**: Ingress must use **alb.ingress.kubernetes.io/target-type: ip** annotation, no NodePort available on Fargate
+- **Pod Execution Role**: IAM role attached to **Fargate pods** for AWS service permissions (ECR, Secrets Manager, etc.)
+- **No DaemonSets**: Fargate doesn't support **DaemonSets**, system components must run on EC2 node group (ALB Controller, External DNS)
+- **Hybrid Architecture**: Common pattern uses **EC2 nodes for system pods** and **Fargate for application workloads**
+- **Private Subnets Only**: Fargate pods run in **private subnets** with NAT Gateway for outbound internet access
+- **Automatic Scaling**: Each pod is **independent compute**, no manual node scaling or capacity planning required
+- **Per-Pod Billing**: Charged based on **vCPU and memory** configured for each pod, higher cost vs shared EC2 nodes
+- **Isolation Benefits**: Enhanced **security isolation** per pod, no noisy neighbor issues, suitable for multi-tenant workloads
+
 ## Step-01: What are we going to learn?
 - **Assumptions:**
   - We already havea EKS Cluster whose name is **eksdemo1** created using eksctl

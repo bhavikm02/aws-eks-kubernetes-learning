@@ -3,6 +3,99 @@ title: AWS Load Balancer Controller - Ingress Basics
 description: Learn AWS Load Balancer Controller - Ingress Basics
 ---
 
+## ALB Ingress Basics Diagram
+
+```mermaid
+graph TB
+    USER[Client Request<br/>http://example.com] -->|HTTP/HTTPS| ALB[AWS Application Load Balancer<br/>Layer 7]
+    
+    ALB -->|Route Traffic| TG[Target Group<br/>Target Type: Instance]
+    
+    subgraph "EKS Cluster"
+        subgraph "Worker Nodes"
+            NODE1[Node 1<br/>NodePort: 31280]
+            NODE2[Node 2<br/>NodePort: 31280]
+            NODE3[Node 3<br/>NodePort: 31280]
+        end
+        
+        TG -->|NodePort| NODE1
+        TG -->|NodePort| NODE2
+        TG -->|NodePort| NODE3
+        
+        NODE1 -->|Forward| POD1[App1 Pod]
+        NODE2 -->|Forward| POD2[App1 Pod]
+        NODE3 -->|Forward| POD3[App1 Pod]
+        
+        SVCNP[NodePort Service<br/>app1-nginx-nodeport-service<br/>Port: 80, NodePort: 31280]
+        SVCNP -.->|Selects| POD1
+        SVCNP -.->|Selects| POD2
+        
+        ING[Ingress Resource<br/>ingress-basics]
+        ING -->|Backend| SVCNP
+    end
+    
+    subgraph "AWS Load Balancer Controller"
+        LBC[Controller Pod<br/>watches Ingress]
+        LBC -->|Reconcile| ING
+        LBC -->|Create| ALB
+        LBC -->|Create| TG
+        LBC -->|Register| NODE1
+        LBC -->|Register| NODE2
+        LBC -->|Register| NODE3
+    end
+    
+    subgraph "Ingress Configuration"
+        IC[ingressClassName: alb]
+        ANNO[Annotations]
+        ANNO --> SCHEME[alb.ingress.kubernetes.io/scheme: internet-facing]
+        ANNO --> TARGET[alb.ingress.kubernetes.io/target-type: instance]
+        DEFAULT[spec.defaultBackend<br/>Forward all traffic to app1]
+        RULES[spec.rules<br/>Optional: Path/Host routing]
+    end
+    
+    ING --> IC
+    ING --> ANNO
+    ING --> DEFAULT
+    ING --> RULES
+    
+    subgraph "Ingress Class"
+        INGCLASS[IngressClass: alb]
+        INGCLASS --> CONTROLLER_NAME[controller: ingress.k8s.aws/alb]
+    end
+    
+    IC -.->|References| INGCLASS
+    
+    subgraph "Traffic Flow Options"
+        INSTANCE_MODE[Instance Mode<br/>ALB -> NodePort -> Pod]
+        IP_MODE[IP Mode<br/>ALB -> Pod IP directly]
+    end
+    
+    subgraph "Ingress vs Service"
+        VS1[Service Type LoadBalancer:<br/>Creates separate LB per service]
+        VS2[Ingress:<br/>Single ALB for multiple services]
+        VS3[Ingress:<br/>Path/Host-based routing]
+    end
+    
+    style ALB fill:#FF9900
+    style LBC fill:#4A90E2
+    style ING fill:#2E8B57
+    style TG fill:#FFD700
+    style POD1 fill:#90EE90
+```
+
+### Diagram Explanation
+
+- **Ingress Resource**: Kubernetes **API object** that defines HTTP routing rules, managed by AWS Load Balancer Controller
+- **IngressClassName**: Specifies which controller handles the Ingress, **alb** class tells AWS LB Controller to create ALB
+- **Default Backend**: Simplest Ingress form, forwards **all traffic** to single service without path/host rules
+- **Target Type Instance**: ALB routes traffic to **NodePort on worker nodes**, kube-proxy forwards to pod IPs
+- **Target Type IP**: Alternative where ALB routes **directly to pod IPs**, more efficient but requires CNI support
+- **AWS Load Balancer Controller**: Watches **Ingress resources**, creates/updates ALB, Target Groups, and registers targets automatically
+- **NodePort Service**: Required for **instance mode**, exposes pods on static port across all nodes
+- **Annotations**: AWS-specific **configuration** on Ingress (scheme, target-type, SSL certs, WAF, etc.)
+- **Single ALB Multiple Services**: Key advantage over LoadBalancer Service - **one ALB** routes to many services via rules
+- **IngressClass Resource**: Defines controller **implementation**, allows multiple ingress controllers in same cluster
+
 ## Step-01: Introduction
 - Discuss about the Application Architecture which we are going to deploy
 - Understand the following Ingress Concepts

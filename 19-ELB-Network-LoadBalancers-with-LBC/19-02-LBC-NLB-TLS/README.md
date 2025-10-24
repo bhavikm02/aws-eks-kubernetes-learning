@@ -3,6 +3,85 @@ title: AWS Load Balancer Controller - NLB TLS
 description: Learn to use AWS Network Load Balancer TLS with AWS Load Balancer Controller
 ---
 
+## NLB TLS Termination Diagram
+
+```mermaid
+graph TB
+    USER[Client] -->|HTTPS Request<br/>Port 443| NLB[Network Load Balancer<br/>TLS Listener]
+    
+    NLB -->|TLS Handshake| CERT[ACM Certificate<br/>SSL/TLS Certificate]
+    CERT -->|Validate| NLB
+    
+    NLB -->|Decrypt TLS| BACKEND_PROTO{Backend Protocol?}
+    
+    BACKEND_PROTO -->|tcp| TCP_BACKEND[Plain TCP to Pods<br/>Port 80]
+    BACKEND_PROTO -->|tls| TLS_BACKEND[Re-encrypt TLS to Pods<br/>Port 443]
+    
+    TCP_BACKEND -->|Target: Pod IP| POD1[Nginx Pod 1<br/>Port 80]
+    TCP_BACKEND -->|Target: Pod IP| POD2[Nginx Pod 2<br/>Port 80]
+    
+    subgraph "TLS Configuration Annotations"
+        SSL_CERT[service.beta.kubernetes.io/aws-load-balancer-ssl-cert<br/>ACM Certificate ARN]
+        SSL_PORTS[service.beta.kubernetes.io/aws-load-balancer-ssl-ports<br/>443]
+        SSL_POLICY[service.beta.kubernetes.io/aws-load-balancer-ssl-negotiation-policy<br/>ELBSecurityPolicy-TLS13-1-2-2021-06]
+        BACKEND_PROTO_ANNO[service.beta.kubernetes.io/aws-load-balancer-backend-protocol<br/>tcp or tls]
+    end
+    
+    subgraph "NLB Listener Configuration"
+        LISTENER443[Listener: Port 443<br/>Protocol: TLS]
+        LISTENER80[Listener: Port 80<br/>Protocol: TCP<br/>Optional]
+        
+        LISTENER443 --> TLS_TERMINATE[TLS Termination at NLB]
+        LISTENER80 --> NO_TLS[No TLS]
+    end
+    
+    NLB --> LISTENER443
+    NLB -.->|Optional| LISTENER80
+    
+    subgraph "TLS Security Policies"
+        POL1[ELBSecurityPolicy-TLS13-1-2-2021-06<br/>Latest TLS 1.3]
+        POL2[ELBSecurityPolicy-TLS-1-2-2017-01<br/>TLS 1.2 minimum]
+        POL3[ELBSecurityPolicy-2016-08<br/>Older TLS versions]
+    end
+    
+    SSL_POLICY -.->|Configures| POL1
+    
+    subgraph "Certificate Management"
+        ACM[AWS Certificate Manager]
+        ACM --> CERT_REQ[Request Certificate]
+        ACM --> CERT_VALID[DNS or Email Validation]
+        ACM --> CERT_AUTO[Auto-renewal]
+        ACM --> CERT_ARN[Certificate ARN]
+    end
+    
+    CERT -.->|Managed by| ACM
+    
+    subgraph "Traffic Flow Scenarios"
+        S1[Client --HTTPS--> NLB --HTTP--> Pods<br/>TLS termination at NLB]
+        S2[Client --HTTPS--> NLB --HTTPS--> Pods<br/>End-to-end encryption]
+        S3[Client --HTTPS:443--> NLB<br/>Client --HTTP:80--> NLB<br/>Mixed listeners]
+    end
+    
+    style NLB fill:#FF9900
+    style CERT fill:#2E8B57
+    style POD1 fill:#90EE90
+    style LISTENER443 fill:#4A90E2
+    style SSL_POLICY fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **TLS Termination at NLB**: NLB **decrypts** incoming HTTPS traffic using ACM certificate, sends plain TCP to pods
+- **ACM Certificate**: Certificate from **AWS Certificate Manager** referenced by ARN in annotation, automatically renewed
+- **SSL Ports Annotation**: Specifies which listener ports use **TLS** (e.g., 443), allows mixed TLS and non-TLS listeners
+- **Backend Protocol**: Set to **tcp** for TLS termination or **tls** for end-to-end encryption (pass-through)
+- **TLS Security Policy**: Defines **allowed TLS versions** and cipher suites, latest policy supports TLS 1.3
+- **Mixed Listeners**: Can have both **port 443 (TLS)** and **port 80 (plain TCP)** on same NLB
+- **Target Type IP**: NLB forwards decrypted traffic **directly to pod IPs** on configured target port
+- **Certificate Validation**: ACM validates **domain ownership** via DNS or email before issuing certificate
+- **Cipher Suites**: Security policy controls **encryption algorithms** used during TLS handshake
+- **Performance**: NLB TLS offloading reduces **CPU load on pods**, centralizes certificate management
+
 ## Step-01: Introduction
 - Understand about the 4 TLS Annotations for Network Load Balancers
 - aws-load-balancer-ssl-cert

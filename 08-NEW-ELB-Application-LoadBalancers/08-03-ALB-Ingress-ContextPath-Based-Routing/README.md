@@ -3,6 +3,102 @@ title: AWS Load Balancer Ingress Context Path Based Routing
 description: Learn AWS Load Balancer Controller - Ingress Context Path Based Routing
 ---
 
+## Context Path Based Routing Diagram
+
+```mermaid
+graph TB
+    USER[Client Request] -->|HTTP Request| ALB[AWS Application Load Balancer<br/>Single ALB]
+    
+    ALB -->|Path: /app1/*| RULE1{Routing Rule 1}
+    ALB -->|Path: /app2/*| RULE2{Routing Rule 2}
+    ALB -->|Path: /*| RULE3{Routing Rule 3<br/>Default}
+    
+    RULE1 -->|Forward to| TG1[Target Group 1<br/>app1 pods]
+    RULE2 -->|Forward to| TG2[Target Group 2<br/>app2 pods]
+    RULE3 -->|Forward to| TG3[Target Group 3<br/>app3 pods]
+    
+    subgraph "EKS Cluster"
+        subgraph "App1 Deployment"
+            SVC1[NodePort Service<br/>app1-nginx-nodeport-service]
+            POD1_1[App1 Pod 1<br/>Image: nginxapp1]
+            POD1_2[App1 Pod 2<br/>Image: nginxapp1]
+            SVC1 -.->|Selects| POD1_1
+            SVC1 -.->|Selects| POD1_2
+        end
+        
+        subgraph "App2 Deployment"
+            SVC2[NodePort Service<br/>app2-nginx-nodeport-service]
+            POD2_1[App2 Pod 1<br/>Image: nginxapp2]
+            POD2_2[App2 Pod 2<br/>Image: nginxapp2]
+            SVC2 -.->|Selects| POD2_1
+            SVC2 -.->|Selects| POD2_2
+        end
+        
+        subgraph "App3 Deployment"
+            SVC3[NodePort Service<br/>app3-nginx-nodeport-service]
+            POD3_1[App3 Pod 1<br/>Image: kubenginx]
+            POD3_2[App3 Pod 2<br/>Image: kubenginx]
+            SVC3 -.->|Selects| POD3_1
+            SVC3 -.->|Selects| POD3_2
+        end
+        
+        ING[Ingress: ingress-cpr-demo<br/>Context Path Routing]
+        ING -->|Backend| SVC1
+        ING -->|Backend| SVC2
+        ING -->|Backend| SVC3
+    end
+    
+    TG1 -->|NodePort| SVC1
+    TG2 -->|NodePort| SVC2
+    TG3 -->|NodePort| SVC3
+    
+    subgraph "Health Check Configuration"
+        HC1[App1 Health: /app1/index.html<br/>Service Annotation]
+        HC2[App2 Health: /app2/index.html<br/>Service Annotation]
+        HC3[App3 Health: /index.html<br/>Service Annotation]
+    end
+    
+    SVC1 --> HC1
+    SVC2 --> HC2
+    SVC3 --> HC3
+    
+    subgraph "Ingress Rules"
+        PATH1[Path: /app1<br/>PathType: Prefix]
+        PATH2[Path: /app2<br/>PathType: Prefix]
+        PATH3[Path: /<br/>PathType: Prefix<br/>Catch-all]
+    end
+    
+    ING --> PATH1
+    ING --> PATH2
+    ING --> PATH3
+    
+    subgraph "Example Requests"
+        EX1[http://alb-dns/app1/login → App1]
+        EX2[http://alb-dns/app2/api → App2]
+        EX3[http://alb-dns/anything → App3]
+    end
+    
+    style ALB fill:#FF9900
+    style ING fill:#2E8B57
+    style TG1 fill:#4A90E2
+    style TG2 fill:#4A90E2
+    style TG3 fill:#4A90E2
+    style RULE3 fill:#FFD700
+```
+
+### Diagram Explanation
+
+- **Single ALB Multiple Apps**: One ALB handles **multiple applications** using path-based routing, cost-effective vs separate load balancers
+- **Ingress Rules**: Define **path patterns** (/app1, /app2, /*) that map to different backend services
+- **Path Matching Priority**: More specific paths evaluated **before generic paths**, /* catches all unmatched requests
+- **Target Groups**: ALB creates **separate Target Group** per backend service for independent health checks and routing
+- **Health Check Paths**: Each service has **custom health check** annotation, ALB verifies correct endpoint per application
+- **PathType Prefix**: Matches request if path **starts with** specified prefix, /app1 matches /app1/login, /app1/api, etc.
+- **Service-Level Annotations**: Health check paths moved to **Service annotations** instead of Ingress for multi-target scenarios
+- **Traffic Distribution**: Each Target Group load balances across **multiple pod replicas** of that application
+- **Catch-All Route**: Path `/*` serves as **default backend** for any requests not matching specific paths
+- **Cost Efficiency**: Single ALB with rules is **cheaper** than 3 separate ALBs, shared infrastructure for multiple services
+
 ## Step-01: Introduction
 - Discuss about the Architecture we are going to build as part of this Section
 - We are going to deploy all these 3 apps in kubernetes with context path based routing enabled in Ingress Controller

@@ -1,5 +1,75 @@
 # Microservices Distributed Tracing with X-Ray on AWS EKS
 
+## X-Ray Distributed Tracing Diagram
+
+```mermaid
+graph TB
+    USER[End User] -->|HTTPS Request| ALB[Application Load Balancer]
+    ALB -->|Forward| UMS[User Management Service]
+    
+    UMS -->|Call API| NOTIF[Notification Service]
+    
+    subgraph "X-Ray Tracing Flow"
+        UMS -->|1. Send Trace Segment| XRAY_DAEMON1[X-Ray Daemon<br/>DaemonSet on Node 1]
+        NOTIF -->|2. Send Trace Segment| XRAY_DAEMON2[X-Ray Daemon<br/>DaemonSet on Node 2]
+        
+        XRAY_DAEMON1 -->|3. Batch & Forward| XRAY_API[AWS X-Ray Service<br/>API Endpoint]
+        XRAY_DAEMON2 -->|3. Batch & Forward| XRAY_API
+    end
+    
+    XRAY_API -->|4. Store Traces| XRAY_STORAGE[X-Ray Trace Storage]
+    
+    subgraph "X-Ray Console Views"
+        XRAY_STORAGE --> SERVICEMAP[Service Map<br/>Visual Architecture]
+        XRAY_STORAGE --> TRACES[Traces<br/>Request Timeline]
+        XRAY_STORAGE --> ANALYTICS[Analytics<br/>Performance Metrics]
+    end
+    
+    subgraph "Trace Components"
+        SEGMENT[Segment<br/>Single Service Span]
+        SUBSEGMENT[Subsegment<br/>Internal Operations]
+        ANNOTATIONS[Annotations<br/>Searchable Metadata]
+        METADATA[Metadata<br/>Additional Context]
+    end
+    
+    subgraph "X-Ray DaemonSet"
+        DS[DaemonSet Pod on Each Node]
+        DS --> UDP[Listen UDP 2000]
+        DS --> BATCH[Batch Traces]
+        DS --> SEND[Send to X-Ray API]
+        DS --> IAM_ROLE[Service Account<br/>with X-Ray IAM Role]
+    end
+    
+    subgraph "Application Integration"
+        SDK[X-Ray SDK in App]
+        SDK --> ENV1[AWS_XRAY_TRACING_NAME]
+        SDK --> ENV2[AWS_XRAY_DAEMON_ADDRESS]
+        SDK --> ENV3[AWS_XRAY_CONTEXT_MISSING]
+    end
+    
+    UMS -.->|Uses| SDK
+    NOTIF -.->|Uses| SDK
+    
+    style XRAY_DAEMON1 fill:#FF9900
+    style XRAY_DAEMON2 fill:#FF9900
+    style XRAY_API fill:#FF6B6B
+    style SERVICEMAP fill:#4A90E2
+    style TRACES fill:#2E8B57
+```
+
+### Diagram Explanation
+
+- **X-Ray Daemon DaemonSet**: Runs on **every node** as a DaemonSet, listens on **UDP port 2000** for trace segments from applications
+- **Trace Segments**: Each microservice sends **segment data** to local X-Ray daemon, representing that service's portion of the request
+- **Subsegments**: Breakdown of operations **within a segment** (database calls, HTTP requests, custom code blocks) for detailed analysis
+- **Service Map**: **Visual representation** of microservices architecture showing service dependencies, traffic flow, and health status
+- **Distributed Context**: **Trace ID** propagated across services via HTTP headers, correlates all segments belonging to single user request
+- **Annotations**: **Key-value pairs** that are indexed and searchable in X-Ray console, useful for filtering traces by business logic
+- **Metadata**: Additional **non-indexed information** attached to segments for context, includes request/response details
+- **IAM Service Account**: X-Ray daemon uses **IRSA** (IAM Roles for Service Accounts) with **AWSXRayDaemonWriteAccess** policy
+- **Batching & Buffering**: Daemon batches traces before sending to **X-Ray API**, reduces API calls and improves performance
+- **Sampling Rules**: Control **percentage of requests** traced to manage costs, default is 1 request/second + 5% of additional requests
+
 ## Step-01: Introduction
 ### Introduction to AWS XRay & k8s DaemonSets 
 - Understand about AWS X-Ray Services
